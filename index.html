@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редактор MD</title>
+<script src="lib/marked.min.js"></script>
+<script src="lib/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #f5f6f8; --border: #dcdfe4; --text: #1f2328;
+    --muted: #6a737d; --accent: #2f6feb; --code-bg: #f0f2f5;
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181d; --panel: #1f2229; --border: #343842; --text: #e6e8eb;
+    --muted: #9aa1ab; --accent: #6ea8fe; --code-bg: #262a33;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+  header .name { flex: 1 1 100px; min-width: 0; text-align: right; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button {
+    background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 6px;
+    padding: 4px 9px; font: inherit; cursor: pointer; min-width: 30px;
+  }
+  button:hover { border-color: var(--border); background: var(--bg); }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  main { flex: 1; display: flex; min-height: 0; }
+  main > * { flex: 1; min-width: 0; overflow: auto; }
+  #editor {
+    resize: none; border: 0; outline: none; padding: 16px 20px; background: var(--bg); color: var(--text);
+    font: 14px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace; tab-size: 4;
+    border-right: 1px solid var(--border);
+  }
+  #preview { padding: 16px 28px; }
+  main.edit #preview, main.view #editor { display: none; }
+  main.view #preview { max-width: 900px; margin: 0 auto; }
+  footer {
+    display: flex; gap: 16px; padding: 3px 12px; font-size: 12px; color: var(--muted);
+    background: var(--panel); border-top: 1px solid var(--border);
+  }
+  footer .dirty { color: #d29922; }
+  /* Стили превью */
+  #preview h1, #preview h2 { border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+  #preview a { color: var(--accent); }
+  #preview code { background: var(--code-bg); padding: .15em .35em; border-radius: 4px; font-family: ui-monospace, Consolas, monospace; font-size: 90%; }
+  #preview pre { background: var(--code-bg); padding: 12px; border-radius: 6px; overflow: auto; }
+  #preview pre code { padding: 0; background: none; }
+  #preview blockquote { margin: 0; padding: 0 1em; color: var(--muted); border-left: 4px solid var(--border); }
+  #preview table { border-collapse: collapse; }
+  #preview th, #preview td { border: 1px solid var(--border); padding: 4px 10px; }
+  #preview img { max-width: 100%; }
+  #preview hr { border: 0; border-top: 1px solid var(--border); }
+  .drop { outline: 3px dashed var(--accent); outline-offset: -8px; }
+  @media (max-width: 700px) {
+    main.split { flex-direction: column; }
+    #editor { border-right: 0; border-bottom: 1px solid var(--border); }
+  }
+  @media print {
+    header, footer, #editor { display: none !important; }
+    #preview { display: block !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <button id="btnNew" title="Новый (Ctrl+N)">Новый</button>
+  <button id="btnOpen" title="Открыть (Ctrl+O)">Открыть</button>
+  <button id="btnSave" title="Сохранить (Ctrl+S)">Сохранить</button>
+  <button id="btnSaveAs" title="Сохранить как (Ctrl+Shift+S)">Сохранить как</button>
+  <button id="btnHtml" title="Экспорт в HTML">HTML</button>
+  <span class="sep"></span>
+  <button data-md="bold" title="Жирный (Ctrl+B)"><b>Ж</b></button>
+  <button data-md="italic" title="Курсив (Ctrl+I)"><i>К</i></button>
+  <button data-md="strike" title="Зачёркнутый"><s>З</s></button>
+  <button data-md="h1" title="Заголовок 1">H1</button>
+  <button data-md="h2" title="Заголовок 2">H2</button>
+  <button data-md="h3" title="Заголовок 3">H3</button>
+  <button data-md="ul" title="Маркированный список">•</button>
+  <button data-md="ol" title="Нумерованный список">1.</button>
+  <button data-md="task" title="Чек-лист">☐</button>
+  <button data-md="quote" title="Цитата">❝</button>
+  <button data-md="code" title="Код (Ctrl+`)">&lt;/&gt;</button>
+  <button data-md="link" title="Ссылка (Ctrl+K)">🔗</button>
+  <button data-md="table" title="Таблица">▦</button>
+  <button data-md="hr" title="Линия">―</button>
+  <span class="sep"></span>
+  <button data-mode="edit" title="Только редактор">✎</button>
+  <button data-mode="split" title="Редактор + просмотр">◫</button>
+  <button data-mode="view" title="Только просмотр">👁</button>
+  <button id="btnTheme" title="Тема">🌓</button>
+  <span class="name" id="fileName"></span>
+</header>
+
+<main id="main" class="split">
+  <textarea id="editor" spellcheck="true" placeholder="Пишите Markdown здесь или перетащите .md файл…"></textarea>
+  <article id="preview"></article>
+</main>
+
+<footer>
+  <span id="stats"></span>
+  <span id="status"></span>
+</footer>
+
+<input type="file" id="fileInput" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const editor = $('editor'), preview = $('preview'), main = $('main');
+  const DRAFT_KEY = 'redactorMD.draft', PREFS_KEY = 'redactorMD.prefs';
+  const hasFSA = 'showOpenFilePicker' in window;
+  const pickerTypes = [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown', '.txt'] } }];
+
+  let fileHandle = null;      // дескриптор файла (Chrome/Edge)
+  let fileName = 'без названия.md';
+  let savedText = '';         // содержимое на момент последнего сохранения
+
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+
+  // ---------- Рендер ----------
+  marked.setOptions({ gfm: true, breaks: false });
+  let renderTimer;
+  function render() {
+    preview.innerHTML = DOMPurify.sanitize(marked.parse(editor.value));
+    const text = editor.value;
+    const words = (text.match(/[\p{L}\p{N}]+/gu) || []).length;
+    $('stats').textContent = `Слов: ${words} · Символов: ${text.length} · Строк: ${text.split('\n').length}`;
+  }
+  function onChange() {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(render, 80);
+    updateTitle();
+    store.set(DRAFT_KEY, { text: editor.value, name: fileName });
+  }
+  const isDirty = () => editor.value !== savedText;
+  function updateTitle() {
+    const mark = isDirty() ? ' •' : '';
+    $('fileName').textContent = fileName + mark;
+    document.title = fileName + mark + ' — Редактор MD';
+    $('status').textContent = isDirty() ? 'не сохранено' : 'сохранено';
+    $('status').className = isDirty() ? 'dirty' : '';
+  }
+  function setDoc(text, name, handle = null) {
+    editor.value = text;
+    savedText = text;
+    fileName = name;
+    fileHandle = handle;
+    render(); updateTitle();
+    store.set(DRAFT_KEY, { text, name });
+  }
+  const confirmDiscard = () => !isDirty() || confirm('Есть несохранённые изменения. Продолжить?');
+
+  // ---------- Файлы ----------
+  async function newFile() {
+    if (confirmDiscard()) setDoc('', 'без названия.md');
+  }
+  async function openFile() {
+    if (!confirmDiscard()) return;
+    if (hasFSA) {
+      try {
+        const [h] = await showOpenFilePicker({ types: pickerTypes });
+        const f = await h.getFile();
+        setDoc(await f.text(), f.name, h);
+      } catch (e) { if (e.name !== 'AbortError') alert(e.message); }
+    } else {
+      $('fileInput').click();
+    }
+  }
+  $('fileInput').onchange = async e => {
+    const f = e.target.files[0];
+    if (f) setDoc(await f.text(), f.name);
+    e.target.value = '';
+  };
+  async function saveFile(asNew = false) {
+    if (hasFSA) {
+      try {
+        if (!fileHandle || asNew) {
+          fileHandle = await showSaveFilePicker({ suggestedName: fileName, types: pickerTypes });
+          fileName = fileHandle.name;
+        }
+        const w = await fileHandle.createWritable();
+        await w.write(editor.value);
+        await w.close();
+      } catch (e) { if (e.name !== 'AbortError') alert(e.message); return; }
+    } else {
+      if (asNew || fileName.startsWith('без названия')) {
+        const n = prompt('Имя файла:', fileName);
+        if (!n) return;
+        fileName = /\.\w+$/.test(n) ? n : n + '.md';
+      }
+      download(editor.value, fileName, 'text/markdown');
+    }
+    savedText = editor.value;
+    updateTitle();
+  }
+  function exportHtml() {
+    const title = fileName.replace(/\.\w+$/, '');
+    const css = [...document.styleSheets[0].cssRules]
+      .map(r => r.cssText).filter(t => t.includes('#preview') || t.startsWith(':root')).join('\n');
+    const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title>
+<style>${css}\nbody{background:var(--bg);color:var(--text);font:16px/1.6 system-ui,sans-serif;margin:0}
+#preview{max-width:860px;margin:0 auto;padding:24px}</style></head>
+<body><article id="preview">${preview.innerHTML}</article></body></html>`;
+    download(html, title + '.html', 'text/html');
+  }
+  function download(text, name, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: type + ';charset=utf-8' }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // Перетаскивание файла в окно
+  document.addEventListener('dragover', e => { e.preventDefault(); main.classList.add('drop'); });
+  document.addEventListener('dragleave', e => { if (!e.relatedTarget) main.classList.remove('drop'); });
+  document.addEventListener('drop', async e => {
+    e.preventDefault(); main.classList.remove('drop');
+    const item = e.dataTransfer.items?.[0];
+    const f = e.dataTransfer.files[0];
+    if (!f || !confirmDiscard()) return;
+    let handle = null;
+    if (item?.getAsFileSystemHandle) { try { handle = await item.getAsFileSystemHandle(); } catch {} }
+    setDoc(await f.text(), f.name, handle?.kind === 'file' ? handle : null);
+  });
+
+  // ---------- Форматирование ----------
+  function replaceSel(text, selStart, selEnd) {
+    editor.focus();
+    const s = editor.selectionStart;
+    // execCommand сохраняет историю Ctrl+Z; запасной вариант — setRangeText
+    if (!document.execCommand('insertText', false, text)) {
+      editor.setRangeText(text, s, editor.selectionEnd, 'end');
+      onChange();
+    }
+    if (selStart != null) editor.setSelectionRange(s + selStart, s + selEnd);
+  }
+  function wrap(before, after = before, placeholder = 'текст') {
+    const { selectionStart: s, selectionEnd: e, value } = editor;
+    const sel = value.slice(s, e) || placeholder;
+    // повторное нажатие снимает форматирование
+    if (value.slice(s - before.length, s) === before && value.slice(e, e + after.length) === after) {
+      editor.setSelectionRange(s - before.length, e + after.length);
+      return replaceSel(sel, 0, sel.length);
+    }
+    replaceSel(before + sel + after, before.length, before.length + sel.length);
+  }
+  function prefixLines(fn) {
+    const v = editor.value;
+    const s = v.lastIndexOf('\n', editor.selectionStart - 1) + 1;
+    let e = v.indexOf('\n', editor.selectionEnd - (editor.selectionEnd > editor.selectionStart ? 1 : 0));
+    if (e === -1) e = v.length;
+    editor.setSelectionRange(s, e);
+    const lines = v.slice(s, e).split('\n');
+    const out = lines.map((l, i) => fn(l, i)).join('\n');
+    replaceSel(out, 0, out.length);
+  }
+  const toggle = p => (l => l.startsWith(p) ? l.slice(p.length) : p + l.replace(/^(#{1,6} |> |- \[[ x]\] |[-*+] |\d+\. )/, ''));
+  function insertBlock(text) {
+    const v = editor.value, s = editor.selectionStart;
+    const pre = s === 0 || v[s - 1] === '\n' ? (v[s - 2] === '\n' || s < 2 ? '' : '\n') : '\n\n';
+    replaceSel(pre + text + '\n');
+  }
+  const actions = {
+    bold: () => wrap('**'),
+    italic: () => wrap('*'),
+    strike: () => wrap('~~'),
+    h1: () => prefixLines(toggle('# ')),
+    h2: () => prefixLines(toggle('## ')),
+    h3: () => prefixLines(toggle('### ')),
+    ul: () => prefixLines(toggle('- ')),
+    task: () => prefixLines(toggle('- [ ] ')),
+    quote: () => prefixLines(toggle('> ')),
+    ol: () => prefixLines((l, i) => /^\d+\. /.test(l) ? l.replace(/^\d+\. /, '') : `${i + 1}. ${l}`),
+    code: () => {
+      const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+      sel.includes('\n') ? wrap('```\n', '\n```', '') : wrap('`', '`', 'код');
+    },
+    link: () => {
+      const { selectionStart: s, selectionEnd: e, value } = editor;
+      const t = value.slice(s, e) || 'текст';
+      replaceSel(`[${t}](https://)`, t.length + 3, t.length + 11);
+    },
+    table: () => insertBlock('| Столбец 1 | Столбец 2 |\n|-----------|-----------|\n| Ячейка    | Ячейка    |'),
+    hr: () => insertBlock('---'),
+  };
+  document.querySelectorAll('[data-md]').forEach(b => b.onclick = () => actions[b.dataset.md]());
+
+  // Enter продолжает списки, Tab — отступ
+  editor.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (editor.selectionStart === editor.selectionEnd && !e.shiftKey) return replaceSel('    ');
+      prefixLines(l => e.shiftKey ? l.replace(/^( {1,4}|\t)/, '') : '    ' + l);
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && editor.selectionStart === editor.selectionEnd) {
+      const v = editor.value, pos = editor.selectionStart;
+      const line = v.slice(v.lastIndexOf('\n', pos - 1) + 1, pos);
+      const m = line.match(/^(\s*)([-*+] \[[ x]\] |[-*+] |(\d+)\. |> )(.*)$/);
+      if (!m) return;
+      e.preventDefault();
+      if (!m[4].trim()) { // пустой пункт — выходим из списка
+        editor.setSelectionRange(pos - line.length, pos);
+        return replaceSel('\n');
+      }
+      let marker = m[2];
+      if (m[3]) marker = `${+m[3] + 1}. `;
+      else if (marker.includes('[x]')) marker = marker.replace('[x]', '[ ]');
+      replaceSel('\n' + m[1] + marker);
+    }
+  });
+
+  // ---------- Горячие клавиши ----------
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    const map = {
+      s: () => saveFile(e.shiftKey), o: openFile, n: newFile,
+      b: actions.bold, i: actions.italic, k: actions.link, '`': actions.code,
+    };
+    const code = { KeyS: 's', KeyO: 'o', KeyN: 'n', KeyB: 'b', KeyI: 'i', KeyK: 'k', Backquote: '`' }[e.code];
+    const fn = map[k] || map[code]; // e.code — чтобы работало и в русской раскладке
+    if (fn) { e.preventDefault(); fn(); }
+  });
+
+  // ---------- Режимы и тема ----------
+  const prefs = Object.assign({ mode: 'split', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }, store.get(PREFS_KEY));
+  function applyPrefs() {
+    main.className = prefs.mode;
+    document.documentElement.dataset.theme = prefs.theme;
+    document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === prefs.mode));
+    store.set(PREFS_KEY, prefs);
+  }
+  document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { prefs.mode = b.dataset.mode; applyPrefs(); });
+  $('btnTheme').onclick = () => { prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark'; applyPrefs(); };
+
+  // Синхронная прокрутка редактора и превью
+  let syncing = false;
+  function syncScroll(from, to) {
+    if (syncing || main.className !== 'split') return;
+    syncing = true;
+    const r = from.scrollTop / Math.max(1, from.scrollHeight - from.clientHeight);
+    to.scrollTop = r * (to.scrollHeight - to.clientHeight);
+    requestAnimationFrame(() => syncing = false);
+  }
+  editor.addEventListener('scroll', () => syncScroll(editor, preview));
+  preview.addEventListener('scroll', () => syncScroll(preview, editor));
+
+  $('btnNew').onclick = newFile;
+  $('btnOpen').onclick = openFile;
+  $('btnSave').onclick = () => saveFile();
+  $('btnSaveAs').onclick = () => saveFile(true);
+  $('btnHtml').onclick = exportHtml;
+  editor.addEventListener('input', onChange);
+  window.addEventListener('beforeunload', e => { if (isDirty()) e.preventDefault(); });
+
+  // ---------- Старт ----------
+  applyPrefs();
+  const draft = store.get(DRAFT_KEY);
+  if (draft?.text) {
+    setDoc(draft.text, draft.name || 'без названия.md');
+    savedText = ''; updateTitle(); // черновик считается несохранённым
+  } else {
+    setDoc('# Добро пожаловать\n\nЭто **редактор Markdown**. Слева — текст, справа — просмотр.\n\n- Откройте файл кнопкой «Открыть» или перетащите его в окно\n- `Ctrl+S` — сохранить\n- Черновик сохраняется автоматически\n', 'без названия.md');
+  }
+  editor.focus();
+})();
+</script>
+</body>
+</html>
